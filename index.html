@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Voice Chat</title>
+</head>
+<body>
+  <h1>Voice Chat</h1>
+  <button id="start">Start Call</button>
+
+  <script>
+    const startButton = document.getElementById('start');
+    let localStream;
+    let peerConnection;
+
+    // Конфигурация для ICE-серверов
+    const config = {
+      iceServers: [
+        {
+          urls: 'stun:stun.l.google.com:19302'
+        }
+      ]
+    };
+
+    // Функция для начала голосового вызова
+    startButton.addEventListener('click', async () => {
+      localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+      peerConnection = new RTCPeerConnection(config);
+
+      // Добавление локального аудиопотока
+      localStream.getTracks().forEach((track) => {
+        peerConnection.addTrack(track, localStream);
+      });
+
+      peerConnection.onicecandidate = (event) => {
+        if (event.candidate) {
+          // Отправка ICE-кандидата другому клиенту через WebSocket
+          ws.send(JSON.stringify({ candidate: event.candidate }));
+        }
+      };
+
+      peerConnection.ontrack = (event) => {
+        const audio = new Audio();
+        audio.srcObject = event.streams[0];
+        audio.play();
+      };
+
+      // Создание offer
+      const offer = await peerConnection.createOffer();
+      await peerConnection.setLocalDescription(offer);
+
+      ws.send(JSON.stringify({ offer }));
+    });
+
+    // Соединение с сервером WebSocket
+    const ws = new WebSocket('ws://localhost:8080');
+
+    ws.onmessage = async (message) => {
+      const data = JSON.parse(message.data);
+
+      if (data.offer) {
+        await peerConnection.setRemoteDescription(new RTCSessionDescription(data.offer));
+        const answer = await peerConnection.createAnswer();
+        await peerConnection.setLocalDescription(answer);
+        ws.send(JSON.stringify({ answer }));
+      } else if (data.answer) {
+        await peerConnection.setRemoteDescription(new RTCSessionDescription(data.answer));
+      } else if (data.candidate) {
+        await peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate));
+      }
+    };
+  </script>
+</body>
+</html>
