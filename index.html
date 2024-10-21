@@ -3,74 +3,113 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Voice Chat</title>
+  <title>My Discord Clone</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 20px;
+    }
+    #chat {
+      width: 300px;
+      height: 400px;
+      border: 1px solid black;
+      overflow-y: scroll;
+      margin-bottom: 10px;
+    }
+    input {
+      width: 300px;
+      padding: 10px;
+      margin-bottom: 10px;
+    }
+    button {
+      padding: 10px 20px;
+    }
+  </style>
 </head>
 <body>
-  <h1>Voice Chat</h1>
-  <button id="start">Start Call</button>
+  <h1>Welcome to My Discord Clone</h1>
 
+  <div id="your-id">
+    <strong>Your ID:</strong> <span id="my-id"></span>
+  </div>
+
+  <div id="chat">
+    <!-- Сообщения чата будут отображаться здесь -->
+  </div>
+
+  <input id="messageInput" placeholder="Type a message..." />
+  <button id="sendBtn">Send</button>
+
+  <div>
+    <strong>Enter user ID to check status or call:</strong>
+    <input id="userIdInput" placeholder="User ID" />
+    <button id="checkStatusBtn">Check Status</button>
+    <button id="callBtn">Call</button>
+    <p id="status"></p>
+  </div>
+
+  <video id="remote-video" autoplay></video>
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/peerjs@1/dist/peer.min.js"></script>
   <script>
-    const startButton = document.getElementById('start');
-    let localStream;
-    let peerConnection;
+    const socket = io();
+    const peer = new Peer();
 
-    // Конфигурация для ICE-серверов
-    const config = {
-      iceServers: [
-        {
-          urls: 'stun:stun.l.google.com:19302'
-        }
-      ]
-    };
-
-    // Функция для начала голосового вызова
-    startButton.addEventListener('click', async () => {
-      localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-
-      peerConnection = new RTCPeerConnection(config);
-
-      // Добавление локального аудиопотока
-      localStream.getTracks().forEach((track) => {
-        peerConnection.addTrack(track, localStream);
-      });
-
-      peerConnection.onicecandidate = (event) => {
-        if (event.candidate) {
-          // Отправка ICE-кандидата другому клиенту через WebSocket
-          ws.send(JSON.stringify({ candidate: event.candidate }));
-        }
-      };
-
-      peerConnection.ontrack = (event) => {
-        const audio = new Audio();
-        audio.srcObject = event.streams[0];
-        audio.play();
-      };
-
-      // Создание offer
-      const offer = await peerConnection.createOffer();
-      await peerConnection.setLocalDescription(offer);
-
-      ws.send(JSON.stringify({ offer }));
+    // Отображение ID пользователя
+    peer.on('open', (id) => {
+      document.getElementById('my-id').innerText = id;
+      socket.emit('register-user', id);
     });
 
-    // Соединение с сервером WebSocket
-    const ws = new WebSocket('ws://localhost:8080');
+    // Отправка сообщения чата
+    document.getElementById('sendBtn').addEventListener('click', () => {
+      const msg = document.getElementById('messageInput').value;
+      socket.emit('chat message', msg);
+      document.getElementById('messageInput').value = '';
+    });
 
-    ws.onmessage = async (message) => {
-      const data = JSON.parse(message.data);
+    // Получение сообщений чата
+    socket.on('chat message', (msg) => {
+      const chat = document.getElementById('chat');
+      const messageElement = document.createElement('p');
+      messageElement.textContent = msg;
+      chat.appendChild(messageElement);
+      chat.scrollTop = chat.scrollHeight;
+    });
 
-      if (data.offer) {
-        await peerConnection.setRemoteDescription(new RTCSessionDescription(data.offer));
-        const answer = await peerConnection.createAnswer();
-        await peerConnection.setLocalDescription(answer);
-        ws.send(JSON.stringify({ answer }));
-      } else if (data.answer) {
-        await peerConnection.setRemoteDescription(new RTCSessionDescription(data.answer));
-      } else if (data.candidate) {
-        await peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate));
-      }
-    };
+    // Проверка статуса пользователя
+    document.getElementById('checkStatusBtn').addEventListener('click', () => {
+      const userId = document.getElementById('userIdInput').value;
+      socket.emit('check-user-status', userId);
+    });
+
+    // Получение статуса пользователя
+    socket.on('user-status', ({ userId, online }) => {
+      const statusText = online ? `${userId} is online` : `${userId} is offline`;
+      document.getElementById('status').innerText = statusText;
+    });
+
+    // Осуществление звонка
+    document.getElementById('callBtn').addEventListener('click', () => {
+      const userId = document.getElementById('userIdInput').value;
+      const call = peer.call(userId, null);
+      call.on('stream', (stream) => {
+        document.getElementById('remote-video').srcObject = stream;
+      });
+    });
+
+    // Обработка входящего звонка
+    peer.on('call', (call) => {
+      navigator.mediaDevices.getUserMedia({ video: true, audio: true }).then((stream) => {
+        call.answer(stream);
+        call.on('stream', (remoteStream) => {
+          document.getElementById('remote-video').srcObject = remoteStream;
+        });
+      });
+    });
   </script>
 </body>
 </html>
